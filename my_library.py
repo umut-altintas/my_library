@@ -2,14 +2,55 @@
 
 -Kitap takip uygulaması-
 
-"""
+-Amaç:
 
+Yazar ekleme, silme. 
+Eklenen yazara kitap ekleme, silme, okundu/okunmadı durumu ekleme. 
+Okunan kitaplara puanlama yapma, özet ekleme.
+Puanlanan kitaplar üzerinden yazara genel bir puan verme.
+Bitirilen kitapların okunma süresini hesaplama.
+Girdiler "my_lib.db" dosyasında saklanır.
+
+-Kullanırken:
+
+"Yazar ekle" işlemi yapmadan diğer menülere erişilemez.
+"Kitap ekle" işlemi yapmadan "Kitap işlemleri" menülerine erişilemez.
+"Bitirilen kitap ekle" işlemi yapmadan "Bitirilen kitap işlemleri" menülerine erişilemez.
+"Kitabı puanla" işlemi yapmadan kitap özeti menülerine erişilemez.
+
+-İşlevler:
+
+1. Yazar işlemleri
+    |->1. Yazar ekle
+    |->2. Yazar sil
+    |->3. Yazarları görüntüle
+    |->0. Ana menüye dönüş
+
+2. Kitap işlemleri
+    |->1. Kitap ekle
+    |->2. Kitap sil
+    |->3. Kitapları görüntüle
+    |->4. Bitirilen kitap işlemleri
+        |->1. Bitirilen kitap ekle
+        |->2. Kitabı puanla
+        |->3. Kitap özeti ekle
+        |->4. Kitap özeti görüntüle
+        |->5. Kitap puanlarını görüntüle
+        |->0. Ana menüye dönüş
+    |->0. Ana menüye dönüş
+
+3. Çıkış yap
+    |->1. Çıkmak istediğinize emin misiniz?(y/n)
+
+"""
+import unicodedata
 import datetime as dt
 import time
 import sqlite3
 import sys
 import os
 from typing import Literal
+from collections.abc import Callable
 
 """CONST"""
 #Yazdırma düzeni ve görüntüsü için eklendi.
@@ -28,14 +69,14 @@ HEADER_AUTHOR_SCORE = 20
 """Arrays"""
 
 msg_header = {"author_id":f"{"Yazar No.:":<{HEADER_AUTHOR_ID}}",
-             "book_id":f"{"Kitap No.:":<15}",
-             "author_name":f"{"Yazar adı:":<30}",
-             "book_name":f"{"Kitap adı:":<50}",
-             "book_score":f"{"Kitabın puanı:":<15}",
-             "book_added_date":f"{"Kitabın eklenme tarihi:":<35}",
-             "book_finished_date":f"{"Kitabın bitirilme tarihi:":<35}",
-             "book_reading_time":f"{"Kitabın bitirilme süresi":<15}",
-             "author_score":f"{"Yazar puanı:":<20}"}
+             "book_id":f"{"Kitap No.:":<{HEADER_BOOK_ID}}",
+             "author_name":f"{"Yazar adı:":<{HEADER_AUTHOR_NAME}}",
+             "book_name":f"{"Kitap adı:":<{HEADER_BOOK_NAME}}",
+             "book_score":f"{"Kitabın puanı:":<{HEADER_BOOK_SCORE}}",
+             "book_added_date":f"{"Kitabın eklenme tarihi:":<{HEADER_BOOK_ADDED_DATE}}",
+             "book_finished_date":f"{"Kitabın bitirilme tarihi:":<{HEADER_BOOK_FINISHED_DATE}}",
+             "book_reading_time":f"{"Kitabın bitirilme süresi":<{HEADER_BOOK_READING_TIME}}",
+             "author_score":f"{"Yazar puanı:":<{HEADER_AUTHOR_SCORE}}"}
 
 msg_header_keys = Literal["author_id",
                   "book_id",
@@ -49,7 +90,7 @@ msg_header_keys = Literal["author_id",
 
 msg_author_score_types = {"very_liked":"Çok beğenilen yazar",
                           "liked":"Beğenilen yazar",
-                          "average":"Vasat yazar",
+                          "average":"Ortalama yazar",
                           "disliked":"Kötü yazar"}
 
 msg_user_output = {"invalid_input":"Geçersiz tuşlama yaptınız!",
@@ -71,7 +112,8 @@ msg_user_output = {"invalid_input":"Geçersiz tuşlama yaptınız!",
             "have_been_added_book":"Bu kitap zaten eklenmiş!",
             "does_not_exist_unrated_book":"Puanlanmamış bir kitap bulunmuyor!",
             "does_not_exist_unfinished_book":"Bitirmediğiniz bir kitap bulunmuyor!",
-            "does_not_exist_books":"Listenizde hiç kitap bulunmuyor!"}
+            "does_not_exist_books":"Listenizde hiç kitap bulunmuyor!",
+            "does_not_exist_authors":"Listenizde hiç yazar bulunmuyor!"}
 
 msg_user_input = {"author_name":"Lütfen yazarın ismini giriniz: ",
                   "author_id":"Lütfen yazarın numarasını giriniz: ",
@@ -173,7 +215,7 @@ QUERIES = {"GET_AUTHORS":"SELECT * FROM authors ORDER BY author_id",
            "GET_BOOKS_MISSING_SUMMARY":"SELECT bs.book_id, b.book_name FROM book_scores AS bs JOIN books AS b ON bs.book_id = b.book_id WHERE (book_summary IS NULL OR bs.book_summary = '')",
            "GET_BOOKS_MISSING_SUMMARY_BY_ID":"SELECT book_id FROM book_scores WHERE book_id = ? AND (book_summary IS NULL OR book_summary = '')",
            "GET_BOOK_SUMMARY_BY_ID":"SELECT book_summary FROM book_scores WHERE book_id = ?",
-           "GET_BOOK_SCORES":"SELECT bs.book_id, b.book_name, bs.book_score FROM book_scores AS bs JOIN books AS b ON bs.book_id = b.book_id",
+           "GET_BOOK_SCORES":"SELECT bs.book_id, b.book_name, bs.book_score, fb.book_read_date, fb.book_reading_time FROM book_scores AS bs JOIN books AS b ON bs.book_id = b.book_id JOIN finished_books AS fb ON bs.book_id = fb.book_id",
            "GET_BOOKS_THAT_HAVE_SUMMARY":"SELECT bs.book_id, b.book_name FROM book_scores AS bs JOIN books AS b ON bs.book_id = b.book_id WHERE(bs.book_summary IS NOT NULL)",
            "GET_BOOK_SCORE_BY_ID":"SELECT book_score FROM book_scores WHERE book_id = ?",
            "GET_AUTHOR_ID_BY_BOOK_ID":"SELECT author_id FROM books WHERE book_id = ?",
@@ -200,39 +242,44 @@ def clear_screen() -> None:
     else:
         os.system('clear')
 
-def start_and_clear(function_name) -> None:
+def start_and_clear(function_name:Callable[[], None]) -> None:
     clear_screen()
     function_name()
 
 """Functions for authors"""
 
 def add_author() -> None:
-    user_author_input = input(msg_user_input["author_name"]).strip().title()
-    if any(char.isdigit() for char in user_author_input):
+    user_author_input = input(msg_user_input["author_name"])
+    clean_input = clean_name_input(user_author_input)
+    if not clean_input or not is_valid_name(clean_input):
         popup(msg_user_output["invalid_datatype"])
     else:
         try:
-            cur.execute(VALUES["INSERT_AUTHOR"], [user_author_input])
+            cur.execute(VALUES["INSERT_AUTHOR"], [clean_input])
             con.commit()
-            popup(f"{user_author_input} {msg_user_output['successfully_saved']}")
+            popup(f"{clean_input} {msg_user_output['successfully_saved']}")
         except:
             popup(msg_user_output["have_been_added_author"])
 
 def delete_author() -> None:
     cur.execute(QUERIES["GET_AUTHORS"])
-    header('author_id','author_name')
-    for i in cur.fetchall():
-        print(f"{i[0]:<{HEADER_AUTHOR_ID}}{i[1]:<{HEADER_AUTHOR_NAME}}")
-    delete_author = input(f"\n{msg_user_input["author_id"]}").strip()
-
-    cur.execute(QUERIES["GET_AUTHOR_BY_ID"], [delete_author])
-    temp_deleted_author = cur.fetchone()
-    cur.execute(DELETE["DELETE_AUTHOR"],[delete_author])
-    con.commit()
-    if cur.rowcount > 0:
-        popup(f"{temp_deleted_author} {msg_user_output['successfully_removed']}")
+    authors = cur.fetchall()
+    if len(authors) == 0:
+        popup(msg_user_output['does_not_exist_authors'])
     else:
-        popup(msg_user_output["invalid_author_id"])
+        header('author_id','author_name')
+        for i in authors:
+            print(f"{i[0]:<{HEADER_AUTHOR_ID}}{i[1]:<{HEADER_AUTHOR_NAME}}")
+        delete_author = input(f"\n{msg_user_input["author_id"]}").strip()
+
+        cur.execute(QUERIES["GET_AUTHOR_BY_ID"], [delete_author])
+        temp_deleted_author = cur.fetchone()[0]
+        cur.execute(DELETE["DELETE_AUTHOR"],[delete_author])
+        con.commit()
+        if cur.rowcount > 0:
+            popup(f"{temp_deleted_author} {msg_user_output['successfully_removed']}")
+        else:
+            popup(msg_user_output["invalid_author_id"])
 
 def show_authors() -> None:
     cur.execute(QUERIES["COUNT_AUTHORS"])
@@ -259,25 +306,33 @@ def show_authors() -> None:
 
 def add_book() -> None:
     cur.execute(QUERIES["GET_AUTHORS"])
-    header('author_id','author_name')
-    for i in cur.fetchall():
-        print(f"{i[0]:<{HEADER_AUTHOR_ID}}{i[1]:<{HEADER_AUTHOR_NAME}}")
-    user_author_input = input(f"\n{msg_user_input["to_main_menu"]}\n{msg_user_input['author_id']}").strip().lower()
-    todays_date = dt.datetime.now().isoformat()[:19]
-    if user_author_input == 'q':
-        return
-    cur.execute(QUERIES["GET_AUTHOR_BY_ID"], [user_author_input])
-    check_id = cur.fetchone()
-    if check_id == None:
-        popup(msg_user_output["invalid_author_id"])
+    authors = cur.fetchall()
+    if len(authors) == 0:
+        popup(msg_user_output["does_not_exist_authors"])
     else:
-        try:
-            user_book_input = input(msg_user_input["book_name"]).strip().title()
-            cur.execute(VALUES["INSERT_BOOK"], [user_author_input, user_book_input, todays_date])
-            con.commit()
-            popup(f"{user_book_input}, {msg_user_output['successfully_saved_book']}")
-        except:
-            popup(msg_user_output["have_been_added_book"])
+        header('author_id','author_name')
+        for i in authors:
+            print(f"{i[0]:<{HEADER_AUTHOR_ID}}{i[1]:<{HEADER_AUTHOR_NAME}}")
+        user_author_input = input(f"\n{msg_user_input["to_main_menu"]}\n{msg_user_input['author_id']}").strip().lower()
+        if user_author_input == 'q':
+            return
+        cur.execute(QUERIES["GET_AUTHOR_BY_ID"], [user_author_input])
+        check_id = cur.fetchone()
+        if check_id is None:
+            popup(msg_user_output["invalid_author_id"])
+        else:
+            try:
+                user_book_input = input(msg_user_input["book_name"])
+                clean_input = clean_name_input(user_book_input)
+                if not clean_input or not is_valid_name(clean_input):
+                    popup(msg_user_output["invalid_datatype"])
+                else:
+                    todays_date = dt.datetime.now().isoformat()[:19]
+                    cur.execute(VALUES["INSERT_BOOK"], [user_author_input, clean_input, todays_date])
+                    con.commit()
+                    popup(f"{clean_input}, {msg_user_output['successfully_saved_book']}")
+            except:
+                popup(msg_user_output["have_been_added_book"])
 
 def delete_book() -> None:
     cur.execute(QUERIES["GET_BOOKS"])
@@ -301,10 +356,10 @@ def delete_book() -> None:
                 check_author = cur.fetchone()
                 cur.execute(QUERIES["GET_BOOK_NAME_BY_ID"], [book_id])
                 check_book = cur.fetchone()
-                if check_author == None:
+                if check_author is None:
                     popup(msg_user_output["invalid_author_id"])
                     return
-                elif check_book == None:
+                elif check_book is None:
                     popup(msg_user_output["invalid_book_id"])
                     return
                 else:
@@ -312,8 +367,11 @@ def delete_book() -> None:
                     book_name = cur.fetchone()[0]
                     cur.execute(DELETE["DELETE_BOOK"], [author_id,book_id])
                     con.commit()
-                    update_author_score(int(author_id))
-                    popup(f"{book_name}, {msg_user_output['successfully_deleted_book']}")
+                    if cur.rowcount == 0:
+                        popup(msg_user_output["invalid_input"])
+                    else:
+                        update_author_score(int(author_id))
+                        popup(f"{book_name}, {msg_user_output['successfully_deleted_book']}")
         except IndexError:
             popup(msg_user_output["invalid_format"])
 
@@ -411,7 +469,7 @@ def add_book_summary() -> None:
         book_id = input(msg_user_input["book_id"]).strip()
         cur.execute(QUERIES["GET_BOOKS_MISSING_SUMMARY_BY_ID"], [book_id])
         _ = cur.fetchone()
-        if _ == None:
+        if _ is None:
             popup(msg_user_output["invalid_book_id"])
         else:
             try:
@@ -451,9 +509,9 @@ def show_book_scores() -> None:
         popup(msg_user_output['does_not_exist_book_score'])
     else:
         cur.execute(QUERIES["GET_BOOK_SCORES"])
-        header('book_id', 'book_name', 'book_score')
+        header('book_id', 'book_name', 'book_score', 'book_finished_date','book_reading_time')
         for i in cur.fetchall():
-            print(f"{i[0]:<{HEADER_BOOK_ID}}{i[1]:<{HEADER_BOOK_NAME}}{i[2]:<{HEADER_BOOK_SCORE}}")
+            print(f"{i[0]:<{HEADER_BOOK_ID}}{i[1]:<{HEADER_BOOK_NAME}}{i[2]:<{HEADER_BOOK_SCORE}}{i[3]:<{HEADER_BOOK_FINISHED_DATE}}{i[4]:<{HEADER_BOOK_READING_TIME}}")
         _ = input(msg_user_input["to_main_menu"])
 
 """Misc Functions"""
@@ -500,6 +558,17 @@ def header(*keys: msg_header_keys) -> None:
         print(msg_header[i], end='')
     print(f"{RESET}\n")
 
+def is_valid_name(name:str) -> bool:
+    for char in name:
+        if not (unicodedata.category(char).startswith('L') or char.isspace() or unicodedata.category(char).startswith('N')):
+            return False
+    return True
+
+def clean_name_input(name:str) -> str:
+    clean_input:str = " ".join(name.split()).title()
+    return clean_input
+
+    
 """Main loop"""
 
 def author_options() -> None:
